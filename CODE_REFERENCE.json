@@ -1,0 +1,343 @@
+{
+  "implementation_code_reference": {
+    "title": "OSM POS Import Feature - Complete Code Reference",
+    "created": "2025-11-11",
+    "components": [
+      {
+        "component_id": 1,
+        "name": "OsmNode Model Extension",
+        "file": "domain/src/main/java/de/seuhd/campuscoffee/domain/model/OsmNode.java",
+        "purpose": "Extended domain model to hold all OSM tag data",
+        "key_changes": {
+          "before": "Only contained nodeId field",
+          "after": "Now contains 20 OSM tag fields for complete location data"
+        },
+        "fields": [
+          "Long nodeId (required)",
+          "String name",
+          "String nameEn",
+          "String nameDe",
+          "String description",
+          "String amenity",
+          "String cuisine",
+          "String street",
+          "String houseNumber",
+          "String postcode",
+          "String city",
+          "String country",
+          "String phone",
+          "String website",
+          "String openingHours",
+          "String internetAccessFee",
+          "String indoorSeating",
+          "String outdoorSeating",
+          "String smoking",
+          "String dietVegan",
+          "String dietVegetarian"
+        ]
+      },
+      {
+        "component_id": 2,
+        "name": "OsmDataServiceImpl - HTTP Client",
+        "file": "data/src/main/java/de/seuhd/campuscoffee/data/impl/OsmDataServiceImpl.java",
+        "purpose": "Fetches OSM data via HTTP and parses JSON response",
+        "key_methods": [
+          {
+            "method": "fetchNode(Long nodeId)",
+            "purpose": "Main entry point - fetches OSM node by ID",
+            "returns": "OsmNode with populated fields",
+            "throws": "OsmNodeNotFoundException"
+          },
+          {
+            "method": "parseOsmNodeResponse(String response, Long nodeId)",
+            "purpose": "Parses OSM API JSON response and extracts tags",
+            "returns": "OsmNode with fields populated from response",
+            "throws": "OsmNodeNotFoundException"
+          },
+          {
+            "method": "getStringTag(JsonNode tagsNode, String tagName)",
+            "purpose": "Helper to safely extract string tags",
+            "returns": "Tag value or null if not present"
+          },
+          {
+            "method": "fetchNodeStub(Long nodeId)",
+            "purpose": "Fallback stub for dev/test mode",
+            "returns": "Hardcoded OsmNode for testing"
+          }
+        ],
+        "api_endpoint": "https://www.openstreetmap.org/api/0.6/node/{id}?format=json",
+        "configuration": "osm.api.enabled property controls real vs stub API"
+      },
+      {
+        "component_id": 3,
+        "name": "PosServiceImpl - OSM to POS Conversion",
+        "file": "domain/src/main/java/de/seuhd/campuscoffee/domain/impl/PosServiceImpl.java",
+        "purpose": "Converts OsmNode to Pos domain object with validation",
+        "key_methods": [
+          {
+            "method": "importFromOsmNode(Long nodeId)",
+            "purpose": "Orchestrates the import process",
+            "flow": "fetch OSM node -> convert to POS -> upsert to database",
+            "throws": ["OsmNodeNotFoundException", "OsmNodeMissingFieldsException", "DuplicatePosNameException"]
+          },
+          {
+            "method": "convertOsmNodeToPos(OsmNode osmNode)",
+            "purpose": "Maps OsmNode to Pos with validation",
+            "validations": [
+              "Name must be present",
+              "Street must be present",
+              "House number must be present",
+              "Postal code must be numeric",
+              "City must be present"
+            ],
+            "throws": "OsmNodeMissingFieldsException if validation fails"
+          },
+          {
+            "method": "getOrThrow(String value, String fieldName, Long nodeId)",
+            "purpose": "Validates required fields",
+            "throws": "OsmNodeMissingFieldsException"
+          },
+          {
+            "method": "getDescription(OsmNode osmNode)",
+            "purpose": "Builds description with priority logic",
+            "priority": "description > (cuisine + amenity) > default"
+          },
+          {
+            "method": "getPosType(OsmNode osmNode)",
+            "purpose": "Maps amenity tag to PosType enum",
+            "mappings": {
+              "cafe,coffee_shop": "PosType.CAFE",
+              "restaurant": "PosType.RESTAURANT",
+              "bar": "PosType.BAR",
+              "bakery": "PosType.BAKERY",
+              "default": "PosType.CAFE"
+            }
+          },
+          {
+            "method": "determineCampusType(String city)",
+            "purpose": "Determines campus from city name",
+            "current": "Returns ALTSTADT for all (enhancement opportunity)"
+          }
+        ]
+      },
+      {
+        "component_id": 4,
+        "name": "DataConfig - Spring Configuration",
+        "file": "data/src/main/java/de/seuhd/campuscoffee/data/config/DataConfig.java",
+        "purpose": "Provides Spring beans for HTTP and JSON processing",
+        "beans": [
+          {
+            "bean": "RestTemplate",
+            "factory": "RestTemplateBuilder",
+            "purpose": "HTTP client for OSM API communication"
+          },
+          {
+            "bean": "ObjectMapper",
+            "type": "com.fasterxml.jackson.databind.ObjectMapper",
+            "purpose": "JSON serialization/deserialization"
+          }
+        ]
+      },
+      {
+        "component_id": 5,
+        "name": "Exception Handling",
+        "file": "api/src/main/java/de/seuhd/campuscoffee/api/exceptions/GlobalExceptionHandler.java",
+        "purpose": "Maps exceptions to HTTP status codes",
+        "mappings": [
+          {
+            "exception": "OsmNodeNotFoundException",
+            "status": "404 Not Found",
+            "handler": "handleNotFoundException"
+          },
+          {
+            "exception": "OsmNodeMissingFieldsException",
+            "status": "400 Bad Request",
+            "handler": "handleBadRequestException"
+          },
+          {
+            "exception": "DuplicatePosNameException",
+            "status": "409 Conflict",
+            "handler": "handleDuplicateException"
+          }
+        ],
+        "response_format": {
+          "errorCode": "Exception class name",
+          "message": "Human-readable error description",
+          "statusCode": "HTTP status code",
+          "statusMessage": "HTTP status message",
+          "timestamp": "When error occurred",
+          "path": "Request path"
+        }
+      },
+      {
+        "component_id": 6,
+        "name": "API Endpoint",
+        "file": "api/src/main/java/de/seuhd/campuscoffee/api/controller/PosController.java",
+        "purpose": "REST endpoint for OSM import",
+        "endpoint": {
+          "method": "POST",
+          "path": "/api/pos/import/osm/{nodeId}",
+          "parameter": "nodeId - OpenStreetMap node ID (Long)",
+          "response_status": "201 Created",
+          "response_body": "PosDto with populated fields"
+        }
+      },
+      {
+        "component_id": 7,
+        "name": "Integration Test",
+        "file": "application/src/test/java/de/seuhd/campuscoffee/systest/PosSystemTests.java",
+        "purpose": "End-to-end test of import functionality",
+        "test_method": "importPosFromOsmNode",
+        "test_steps": [
+          "Call TestUtils.importPosFromOsm with OSM node ID",
+          "Verify response status is 201 Created",
+          "Verify POS ID is assigned",
+          "Verify all address fields are correctly mapped",
+          "Verify type and campus are correctly determined"
+        ],
+        "test_data": {
+          "nodeId": 5589879349,
+          "expected_name": "Rada Coffee & Rösterei",
+          "expected_street": "Untere Straße",
+          "expected_house_number": "21",
+          "expected_postal_code": 69117,
+          "expected_city": "Heidelberg"
+        }
+      },
+      {
+        "component_id": 8,
+        "name": "Test Utilities",
+        "file": "application/src/test/java/de/seuhd/campuscoffee/TestUtils.java",
+        "purpose": "Helper methods for testing",
+        "new_method": {
+          "name": "importPosFromOsm(Long osmNodeId)",
+          "implementation": "Sends POST request to /api/pos/import/osm/{nodeId}",
+          "returns": "PosDto",
+          "expected_status": "201 Created"
+        }
+      },
+      {
+        "component_id": 9,
+        "name": "Configuration Properties",
+        "file": "application/src/main/resources/application.yaml",
+        "purpose": "Configure OSM API usage",
+        "properties": {
+          "osm.api.enabled": {
+            "prod": true,
+            "dev": false,
+            "description": "Controls whether real OSM API is called or stub data is used"
+          }
+        }
+      }
+    ]
+  },
+  "error_scenarios": [
+    {
+      "scenario": "OSM Node Not Found",
+      "trigger": "POST /api/pos/import/osm/nonexistent",
+      "exception": "OsmNodeNotFoundException",
+      "http_response": 404,
+      "message": "OpenStreetMap node not found"
+    },
+    {
+      "scenario": "Missing Required Fields",
+      "trigger": "OSM node lacks name, street, or address fields",
+      "exception": "OsmNodeMissingFieldsException",
+      "http_response": 400,
+      "message": "OSM node does not have required fields"
+    },
+    {
+      "scenario": "Invalid Postal Code",
+      "trigger": "OSM postal code is non-numeric",
+      "exception": "OsmNodeMissingFieldsException",
+      "http_response": 400,
+      "message": "Invalid postal code format"
+    },
+    {
+      "scenario": "Duplicate POS Name",
+      "trigger": "Importing OSM node with existing POS name",
+      "exception": "DuplicatePosNameException",
+      "http_response": 409,
+      "message": "POS with this name already exists"
+    },
+    {
+      "scenario": "Network Error",
+      "trigger": "OSM API unreachable",
+      "exception": "OsmNodeNotFoundException",
+      "http_response": 404,
+      "message": "Failed to fetch OSM node"
+    }
+  ],
+  "validation_rules": [
+    {
+      "field": "name",
+      "validation": "Required, non-empty, non-null",
+      "error": "OsmNodeMissingFieldsException"
+    },
+    {
+      "field": "street",
+      "validation": "Required, non-empty, non-null",
+      "error": "OsmNodeMissingFieldsException"
+    },
+    {
+      "field": "houseNumber",
+      "validation": "Required, non-empty, non-null",
+      "error": "OsmNodeMissingFieldsException"
+    },
+    {
+      "field": "postcode",
+      "validation": "Required, non-empty, must be numeric (parseable to Integer)",
+      "error": "OsmNodeMissingFieldsException"
+    },
+    {
+      "field": "city",
+      "validation": "Required, non-empty, non-null",
+      "error": "OsmNodeMissingFieldsException"
+    }
+  ],
+  "performance_considerations": [
+    "HTTP call to OSM API adds ~500-1000ms latency (in production)",
+    "JSON parsing is typically < 10ms",
+    "Database insert/update is typically < 50ms",
+    "Consider implementing request timeout (e.g., 10 seconds) for OSM API",
+    "Future: Add caching to avoid repeated API calls for same nodeId",
+    "Future: Add batch import endpoint for multiple nodes"
+  ],
+  "security_considerations": [
+    "Validate nodeId input (must be Long, positive)",
+    "OSM API is public - no authentication required",
+    "Sanitize string fields from OSM response before storing",
+    "Database unique constraint on POS name prevents duplicates",
+    "All user inputs validated before database operations"
+  ],
+  "osm_api_response_example": {
+    "elements": [
+      {
+        "type": "node",
+        "id": 5589879349,
+        "tags": {
+          "name": "Rada Coffee & Rösterei",
+          "name:en": "Rada Coffee & Roastery",
+          "name:de": "Rada Coffee & Rösterei",
+          "amenity": "cafe",
+          "cuisine": "coffee",
+          "addr:street": "Untere Straße",
+          "addr:housenumber": "21",
+          "addr:postcode": "69117",
+          "addr:city": "Heidelberg",
+          "addr:country": "DE",
+          "phone": "+49 6221 123456",
+          "website": "https://www.rada-coffee.de",
+          "opening_hours": "Mo-Sa 08:00-18:00",
+          "internet_access:fee": "no",
+          "indoor_seating": "yes",
+          "outdoor_seating": "yes",
+          "smoking": "no",
+          "diet:vegan": "yes",
+          "diet:vegetarian": "yes",
+          "description": "Caffé und Rösterei"
+        }
+      }
+    ]
+  }
+}
